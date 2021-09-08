@@ -51,7 +51,7 @@ class GameState:
         else:
             self._on_ground_ticks[index] += ticks_elapsed
 
-        player_data.car_id = player_info.spawn_id
+        player_data.car_id = index
         player_data.team_num = player_info.team
         player_data.is_demoed = player_info.is_demolished
         player_data.on_ground = player_info.has_wheel_contact or self._on_ground_ticks[index] <= 6

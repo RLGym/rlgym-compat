@@ -5,9 +5,12 @@
 # 3) we can import it into your module module
 # https://stackoverflow.com/questions/458550/standard-way-to-embed-version-into-python-package
 
-__version__ = '1.0.1'
+__version__ = '1.0.2'
 
 release_notes = {
+    '1.0.2': """
+    - Fixed on_ground bug
+    """,
     '1.0.1': """
     - Fixed on_ground bug
     """,
