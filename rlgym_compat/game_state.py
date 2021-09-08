@@ -12,6 +12,7 @@ class GameState:
         self.blue_score = 0
         self.orange_score = 0
         self.players: List[PlayerData] = []
+        self._on_ground_ticks = np.zeros(64)
 
         self.ball: PhysicsObject = PhysicsObject()
         self.inverted_ball: PhysicsObject = PhysicsObject()
@@ -20,7 +21,7 @@ class GameState:
         self.boost_pads: np.ndarray = np.zeros(game_info.num_boosts, dtype=np.float32)
         self.inverted_boost_pads: np.ndarray = np.zeros_like(self.boost_pads, dtype=np.float32)
 
-    def decode(self, packet: GameTickPacket):
+    def decode(self, packet: GameTickPacket, ticks_elapsed=1):
         self.blue_score = packet.teams[0].score
         self.orange_score = packet.teams[1].score
 
@@ -33,22 +34,27 @@ class GameState:
 
         self.players = []
         for i in range(packet.num_cars):
-            player = self._decode_player(packet.game_cars[i])
+            player = self._decode_player(packet.game_cars[i], i, ticks_elapsed)
             self.players.append(player)
 
             if player.ball_touched:
                 self.last_touch = player.car_id
 
-    def _decode_player(self, player_info: PlayerInfo) -> PlayerData:
+    def _decode_player(self, player_info: PlayerInfo, index: int, ticks_elapsed: int) -> PlayerData:
         player_data = PlayerData()
 
         player_data.car_data.decode_car_data(player_info.physics)
         player_data.inverted_car_data.invert(player_data.car_data)
 
+        if player_info.has_wheel_contact:
+            self._on_ground_ticks[index] = 0
+        else:
+            self._on_ground_ticks[index] += ticks_elapsed
+
         player_data.car_id = player_info.spawn_id
         player_data.team_num = player_info.team
         player_data.is_demoed = player_info.is_demolished
-        player_data.on_ground = not player_info.jumped and player_info.has_wheel_contact
+        player_data.on_ground = player_info.has_wheel_contact or self._on_ground_ticks[index] <= 6
         player_data.ball_touched = False
         player_data.has_flip = not player_info.double_jumped  # RLGym does consider the timer/unlimited flip, but i'm to lazy to track that in rlbot
         player_data.boost_amount = player_info.boost / 100
