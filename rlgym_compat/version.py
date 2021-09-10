@@ -9,7 +9,7 @@ __version__ = '1.0.2'
 
 release_notes = {
     '1.0.2': """
-    - Fixed on_ground bug
+    - Fixed car_id
     """,
     '1.0.1': """
     - Fixed on_ground bug
