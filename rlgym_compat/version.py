@@ -5,9 +5,12 @@
 # 3) we can import it into your module module
 # https://stackoverflow.com/questions/458550/standard-way-to-embed-version-into-python-package
 
-__version__ = '1.0.2'
+__version__ = '1.0.3'
 
 release_notes = {
+    '1.0.3': """
+    - Updated to include all utils from RLGym
+    """,
     '1.0.2': """
     - Fixed car_id
     """,
