@@ -56,6 +56,7 @@ class GameState:
         player_data.is_demoed = player_info.is_demolished
         player_data.on_ground = player_info.has_wheel_contact or self._on_ground_ticks[index] <= 6
         player_data.ball_touched = False
+        player_data.has_jump = not player_info.jumped
         player_data.has_flip = not player_info.double_jumped  # RLGym does consider the timer/unlimited flip, but i'm to lazy to track that in rlbot
         player_data.boost_amount = player_info.boost / 100
 

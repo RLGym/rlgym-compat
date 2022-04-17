@@ -8,6 +8,7 @@ class PlayerData(object):
         self.is_demoed: bool = False
         self.on_ground: bool = False
         self.ball_touched: bool = False
+        self.has_jump: bool = False
         self.has_flip: bool = False
         self.boost_amount: float = -1
         self.car_data: PhysicsObject = PhysicsObject()
