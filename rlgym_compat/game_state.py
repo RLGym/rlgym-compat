@@ -17,7 +17,6 @@ class GameState:
         self.players: List[PlayerData] = []
         self._on_ground_ticks = np.zeros(64)
         self._air_time_since_jump = np.zeros(64)
-        self._has_flipped = np.zeros(64)
 
         self.ball: PhysicsObject = PhysicsObject()
         self.inverted_ball: PhysicsObject = PhysicsObject()
@@ -26,7 +25,7 @@ class GameState:
         self.boost_pads: np.ndarray = np.zeros(game_info.num_boosts, dtype=np.float32)
         self.inverted_boost_pads: np.ndarray = np.zeros_like(self.boost_pads, dtype=np.float32)
 
-    def decode(self, packet: GameTickPacket, ticks_elapsed=1):
+    def decode(self, packet: GameTickPacket, ticks_elapsed=1, tick_skip=8):
         self.blue_score = packet.teams[0].score
         self.orange_score = packet.teams[1].score
 
@@ -38,12 +37,17 @@ class GameState:
         self.inverted_ball.invert(self.ball)
 
         self.players = []
+        latest_touch = packet.game_ball.latest_touch
         for i in range(packet.num_cars):
             player = self._decode_player(packet.game_cars[i], i, ticks_elapsed)
+            if latest_touch.time_seconds > 0 and i == latest_touch.player_index and latest_touch.time_seconds - packet.game_info.seconds_elapsed < tick_skip / 120:
+                player.ball_touched = True
+            
             self.players.append(player)
-
-            if player.ball_touched:
-                self.last_touch = player.car_id
+        
+        if latest_touch.time_seconds > 0:
+            self.last_touch = latest_touch.player_index
+        
 
     def _decode_player(self, player_info: PlayerInfo, index: int, ticks_elapsed: int) -> PlayerData:
         player_data = PlayerData()
