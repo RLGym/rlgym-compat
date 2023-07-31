@@ -40,7 +40,7 @@ class GameState:
         latest_touch = packet.game_ball.latest_touch
         for i in range(packet.num_cars):
             player = self._decode_player(packet.game_cars[i], i, ticks_elapsed)
-            if latest_touch.time_seconds > 0 and i == latest_touch.player_index and latest_touch.time_seconds - packet.game_info.seconds_elapsed < tick_skip / 120:
+            if latest_touch.time_seconds > 0 and i == latest_touch.player_index and packet.game_info.seconds_elapsed - latest_touch.time_seconds < tick_skip / 120:
                 player.ball_touched = True
             
             self.players.append(player)
