@@ -10,7 +10,7 @@ __version__ = '1.1.1'
 release_notes = {
     '1.1.1': """
     - Added additional properties, make has_jump more accurate
-    """
+    """,
     '1.1.0': """
     - Added has_jump
     """,
