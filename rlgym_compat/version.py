@@ -5,9 +5,12 @@
 # 3) we can import it into your module module
 # https://stackoverflow.com/questions/458550/standard-way-to-embed-version-into-python-package
 
-__version__ = '1.1.0'
+__version__ = '1.1.1'
 
 release_notes = {
+    '1.1.1': """
+    - Added additional properties, make has_jump more accurate
+    """
     '1.1.0': """
     - Added has_jump
     """,
