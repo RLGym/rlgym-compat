@@ -1,63 +1,187 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Dict, Optional, Generic, TypeVar, Any, Callable
+
 import numpy as np
-from typing import List
+from rlbot.flat import (
+    FieldInfo,
+    GamePacket,
+    GravityMutator,
+    MatchConfiguration,
+    MatchPhase,
+)
 
-from rlbot.utils.structures.game_data_struct import GameTickPacket, FieldInfoPacket, PlayerInfo
-
+from .car import Car
+from .common_values import BOOST_LOCATIONS
+from .extra_info import ExtraPacketInfo
+from .game_config import GameConfig
 from .physics_object import PhysicsObject
-from .player_data import PlayerData
+from .utils import create_default_init
+
+AgentID = TypeVar("AgentID")
 
 
-class GameState:
-    def __init__(self, game_info: FieldInfoPacket):
-        self.blue_score = 0
-        self.orange_score = 0
-        self.players: List[PlayerData] = []
-        self._on_ground_ticks = np.zeros(64)
+@dataclass(init=False)
+class GameState(Generic[AgentID]):
+    tick_count: int
+    goal_scored: bool
+    config: GameConfig
+    cars: Dict[AgentID, Car]
+    ball: PhysicsObject
+    _inverted_ball: PhysicsObject
+    boost_pad_timers: np.ndarray
+    _inverted_boost_pad_timers: np.ndarray
 
-        self.ball: PhysicsObject = PhysicsObject()
-        self.inverted_ball: PhysicsObject = PhysicsObject()
+    _first_update_call: bool
+    _agent_ids_fn: Callable[[GamePacket], Dict[int, AgentID]]
+    _tick_skip: int
+    # Unless something changes, this mapping will be [14,10,7,12,8,11,29,4,3,15,18,30,1,2,5,6,9,20,19,22,21,23,25,32,31,26,27,24,28,33,17,13,16,0] for the standard map.
+    _boost_pad_order_mapping: np.ndarray
 
-        # List of "booleans" (1 or 0)
-        self.boost_pads: np.ndarray = np.zeros(game_info.num_boosts, dtype=np.float32)
-        self.inverted_boost_pads: np.ndarray = np.zeros_like(self.boost_pads, dtype=np.float32)
+    __slots__ = tuple(__annotations__)
 
-    def decode(self, packet: GameTickPacket, ticks_elapsed=1):
-        self.blue_score = packet.teams[0].score
-        self.orange_score = packet.teams[1].score
+    exec(create_default_init(__slots__))
 
-        for i in range(packet.num_boost):
-            self.boost_pads[i] = packet.game_boosts[i].is_active
-        self.inverted_boost_pads[:] = self.boost_pads[::-1]
+    @property
+    def scoring_team(self) -> Optional[int]:
+        if self.goal_scored:
+            return 0 if self.ball.position[1] > 0 else 1
+        return None
 
-        self.ball.decode_ball_data(packet.game_ball.physics)
-        self.inverted_ball.invert(self.ball)
+    @property
+    def inverted_ball(self) -> PhysicsObject:
+        self._inverted_ball = self.ball.inverted()
+        return self._inverted_ball
 
-        self.players = []
-        for i in range(packet.num_cars):
-            player = self._decode_player(packet.game_cars[i], i, ticks_elapsed)
-            self.players.append(player)
+    @property
+    def inverted_boost_pad_timers(self) -> np.ndarray:
+        self._inverted_boost_pad_timers = np.ascontiguousarray(
+            self.boost_pad_timers[::-1]
+        )
+        return self._inverted_boost_pad_timers
 
-            if player.ball_touched:
-                self.last_touch = player.car_id
-
-    def _decode_player(self, player_info: PlayerInfo, index: int, ticks_elapsed: int) -> PlayerData:
-        player_data = PlayerData()
-
-        player_data.car_data.decode_car_data(player_info.physics)
-        player_data.inverted_car_data.invert(player_data.car_data)
-
-        if player_info.has_wheel_contact:
-            self._on_ground_ticks[index] = 0
+    @staticmethod
+    def create_compat_game_state(
+        field_info: FieldInfo,
+        match_configuration=MatchConfiguration(),
+        tick_skip=-1,
+        standard_map=True,
+        agent_ids_fn: Optional[Callable[[GamePacket], Dict[int, AgentID]]] = None,
+    ) -> GameState[Any]:
+        assert (
+            tick_skip == -1
+        ), "`tick_skip` was passed as a parameter to `create_compat_game_state`. This parameter is no longer used and should be removed, but be warned - there has been a breaking change for Car ball_touches to better reflect how this variable relates to the number of game ticks your action parser returns engine actions for each time it is called (which is not necessarily constant). Users who care about `Car`s' ball_touches should take care to manually call the new method `reset_car_ball_touches` appropriately."
+        state = GameState()
+        state.tick_count = 0
+        state.goal_scored = False
+        state.config = GameConfig()
+        state.config.boost_consumption = 1  # Not modifiable
+        state.config.dodge_deadzone = 0.5  # Not modifiable
+        if match_configuration.mutators is not None:
+            match match_configuration.mutators.gravity:
+                case GravityMutator.Low:
+                    gravity = -325
+                case GravityMutator.Default:
+                    gravity = -650
+                case GravityMutator.High:
+                    gravity = -1137.5
+                case GravityMutator.SuperHigh:
+                    gravity = -3250
+                case GravityMutator.Reverse:
+                    gravity = 650
+            state.config.gravity = gravity / -650.0
         else:
-            self._on_ground_ticks[index] += ticks_elapsed
+            state.config.gravity = 1
+        state.cars = {}
+        state.ball = PhysicsObject.create_compat_physics_object()
+        state.boost_pad_timers = np.zeros(len(field_info.boost_pads), dtype=np.float32)
+        if standard_map:
+            boost_locations = np.array(BOOST_LOCATIONS)
+            state._boost_pad_order_mapping = np.zeros(
+                len(field_info.boost_pads), dtype=np.int32
+            )
+            for rlbot_boost_pad_idx, boost_pad in enumerate(field_info.boost_pads):
+                loc = np.array(
+                    [boost_pad.location.x, boost_pad.location.y, boost_pad.location.z]
+                )
+                similar_vals = np.isclose(boost_locations[:, :2], loc[:2], atol=2).all(
+                    axis=1
+                )
+                candidate_idx = np.argmax(similar_vals)
+                assert similar_vals[
+                    candidate_idx
+                ], f"Boost pad at location {loc} doesn't match any in the standard map (see BOOST_LOCATIONS in common_values.py)"
+                state._boost_pad_order_mapping[rlbot_boost_pad_idx] = candidate_idx
+        else:
+            state._boost_pad_order_mapping = [
+                idx for idx in range(len(field_info.boost_pads))
+            ]
+        state._first_update_call = True
+        if agent_ids_fn is None:
+            agent_ids_fn = lambda packet: {
+                player_info.player_id: player_info.player_id
+                for player_info in packet.players
+            }
+        state._agent_ids_fn = agent_ids_fn
+        return state
 
-        player_data.car_id = index
-        player_data.team_num = player_info.team
-        player_data.is_demoed = player_info.is_demolished
-        player_data.on_ground = player_info.has_wheel_contact or self._on_ground_ticks[index] <= 6
-        player_data.ball_touched = False
-        player_data.has_jump = not player_info.jumped
-        player_data.has_flip = not player_info.double_jumped  # RLGym does consider the timer/unlimited flip, but i'm to lazy to track that in rlbot
-        player_data.boost_amount = player_info.boost / 100
+    def reset_car_ball_touches(self):
+        for car in self.cars.values():
+            car.reset_ball_touches()
 
-        return player_data
+    def update(
+        self,
+        packet: GamePacket,
+        extra_info: Optional[ExtraPacketInfo] = None,
+    ):
+        doing_first_call = False
+        if self._first_update_call:
+            self.tick_count = packet.match_info.frame_num
+            self._first_update_call = False
+            doing_first_call = True
+        agent_ids_map = self._agent_ids_fn(packet)
+        # Initialize new players
+        for player_index, player_info in enumerate(packet.players):
+            if player_info.player_id not in self.cars:
+                self.cars[agent_ids_map[player_info.player_id]] = Car.create_compat_car(
+                    packet, player_index, self._tick_skip
+                )
+        # Remove old players
+        packet_agent_ids = [
+            agent_ids_map[player.player_id] for player in packet.players
+        ]
+        agent_ids_to_remove = []
+        for agent_id in self.cars:
+            if agent_id not in packet_agent_ids:
+                agent_ids_to_remove.append(agent_id)
+        for agent_id in agent_ids_to_remove:
+            self.cars.pop(agent_id)
+
+        ticks_elapsed = packet.match_info.frame_num - self.tick_count
+        self.tick_count = packet.match_info.frame_num
+        # Nothing to do
+        if ticks_elapsed == 0 and not doing_first_call:
+            return
+
+        self.goal_scored = packet.match_info.match_phase == MatchPhase.GoalScored
+
+        if len(packet.balls) > 0:
+            ball = packet.balls[0]
+            self.ball.update(ball.physics)
+        else:
+            ball = None
+
+        for player_index, player_info in enumerate(packet.players):
+            self.cars[agent_ids_map[player_info.player_id]].update(
+                player_info,
+                packet.match_info.frame_num,
+                extra_player_info=(
+                    None if extra_info is None else extra_info.players[player_index]
+                ),
+            )
+
+        for boost_pad_index, boost_pad in enumerate(packet.boost_pads):
+            self.boost_pad_timers[self._boost_pad_order_mapping[boost_pad_index]] = (
+                boost_pad.timer
+            )
