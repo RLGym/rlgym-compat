@@ -7,7 +7,7 @@ with open("README.md", "r") as readme_file:
     long_description = readme_file.read()
 
 setup(
-    name="rlgym_compat",
+    name="rlgym-compat",
     packages=find_packages(),
     version=__version__,
     description="A library of RLBot compatibility objects for RLGym Agents",
